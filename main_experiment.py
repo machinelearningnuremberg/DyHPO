@@ -129,9 +129,9 @@ dyhpo_budgets = []
 
 while method_budget < budget_limit:
 
-    hp_index, budget = dyhpo_surrogate.suggest()
+    hp_index, budget = dyhpo_surrogate.get_next()
     performance = benchmark.get_performance(hp_index, budget)
-    dyhpo_surrogate.observe(hp_index, budget, performance)
+    dyhpo_surrogate.respond(hp_index, budget, performance)
     budget_cost = 0
     if hp_index in evaluated_configs:
         previous_budget = evaluated_configs[hp_index]

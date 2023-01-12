@@ -1,14 +1,13 @@
 import copy
 import json
 import logging
-import math
 import os
 import time
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from sklearn.preprocessing import MinMaxScaler
-from scipy.stats import norm, t
+import pandas as pd
+from scipy.stats import norm
 import torch
 
 from surrogate_models.dyhpo import DyHPO
@@ -18,12 +17,10 @@ class DyHPOAlgorithm:
 
     def __init__(
         self,
-        hp_candidates: np.ndarray,
-        log_indicator: List,
+        hyperparameter_candidates: pd.DataFrame,
+        max_budget: int,
         seed: int = 11,
-        max_benchmark_epochs: int = 52,
         fantasize_step: int = 1,
-        minimization: bool = True,
         total_budget: int = 500,
         device: str = None,
         dataset_name: str = 'unknown',
@@ -33,22 +30,17 @@ class DyHPOAlgorithm:
     ):
         """
         Args:
-            hp_candidates: np.ndarray
+            hyperparameter_candidates: pd.DataFrame
                 The full list of hyperparameter candidates for
                 a given dataset.
-            log_indicator: List
-                A list with boolean values indicating if a
-                hyperparameter has been log sampled or not.
-            seed: int
-                The seed that will be used for the surrogate.
-            max_benchmark_epochs: int
+            max_budget: int
                 The maximal budget that a hyperparameter configuration
                 has been evaluated in the benchmark for.
+            seed: int
+                The seed that will be used for the surrogate.
             fantasize_step: int
                 The number of steps for which we are looking ahead to
                 evaluate the performance of a hpc.
-            minimization: bool
-                If the objective should be maximized or minimized.
             total_budget: int
                 The total budget given for hyperparameter optimization.
             device: str
@@ -73,19 +65,14 @@ class DyHPOAlgorithm:
         else:
             self.dev = torch.device(device)
 
-        self.hp_candidates = hp_candidates
-        self.log_indicator = log_indicator
-
-        self.scaler = MinMaxScaler()
-        self.hp_candidates = self.preprocess_hp_candidates()
-
-        self.minimization = minimization
+        self.hp_candidates = hyperparameter_candidates
         self.seed = seed
 
         if verbose:
             logging_level = logging.DEBUG
         else:
             logging_level = logging.INFO
+
         self.logger = logging.getLogger()
 
         logging.basicConfig(
@@ -100,19 +87,18 @@ class DyHPOAlgorithm:
         self.examples = dict()
         self.performances = dict()
 
-        # set a seed already, so that it is deterministic when
-        # generating the seeds of the ensemble
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-
-        self.max_benchmark_epochs = max_benchmark_epochs
+        self.max_benchmark_epochs = max_budget
         self.total_budget = total_budget
         self.fantasize_step = fantasize_step
         self.nr_features = self.hp_candidates.shape[1]
 
         initial_configurations_nr = 1
         conf_individual_budget = 1
-        self.init_conf_indices = np.random.choice(self.hp_candidates.shape[0], initial_configurations_nr, replace=False)
+        self.init_conf_indices = np.random.choice(
+            self.hp_candidates.shape[0],
+            initial_configurations_nr,
+            replace=False,
+        )
         self.init_budgets = [conf_individual_budget] * initial_configurations_nr
         # with what percentage configurations will be taken randomly instead of being sampled from the model
         self.fraction_random_configs = 0.1
@@ -152,12 +138,15 @@ class DyHPOAlgorithm:
         # the total budget consumed so far
         self.budget_spent = 0
 
+        # the last hyperparameter configuration index that was
+        # suggested by the algorithm
+        self.last_suggestion_index = -1
+
         self.output_path = output_path
         self.dataset_name = dataset_name
 
         self.no_improvement_threshold = int(self.max_benchmark_epochs + 0.2 * self.max_benchmark_epochs)
         self.no_improvement_patience = 0
-
 
     def _prepare_dataset_and_budgets(self) -> Dict[str, torch.Tensor]:
         """
@@ -210,7 +199,7 @@ class DyHPOAlgorithm:
             load_checkpoint=False,
         )
 
-    def _predict(self) -> Tuple[np.ndarray, np.ndarray, List, List]:
+    def _predict(self) -> Tuple[np.ndarray, np.ndarray, List, np.ndarray]:
         """
         Predict the performances of the hyperparameter configurations
         as well as the standard deviations based on the surrogate model.
@@ -251,7 +240,7 @@ class DyHPOAlgorithm:
 
         return mean_predictions, std_predictions, hp_indices, non_scaled_budgets
 
-    def suggest(self) -> Tuple[int, int]:
+    def get_next(self) -> Tuple[int, int]:
         """
         Suggest a hyperparameter configuration to be evaluated next.
 
@@ -270,9 +259,8 @@ class DyHPOAlgorithm:
 
             random_indice = self.init_conf_indices[self.initial_random_index]
             budget = self.init_budgets[self.initial_random_index]
+            best_config_index = random_indice
             self.initial_random_index += 1
-
-            return random_indice, budget
         else:
             mean_predictions, std_predictions, hp_indices, non_scaled_budgets = self._predict()
             best_prediction_index = self.find_suggested_config(
@@ -309,42 +297,35 @@ class DyHPOAlgorithm:
         if self.budget_spent > self.total_budget:
             exit(0)
 
+        self.last_suggestion_index = best_config_index
+
         return best_config_index, budget
 
-    def observe(
+    def respond(
         self,
-        hp_index: int,
-        b: int,
-        y: float,
+        score: float,
+        learning_curve: np.ndarray,
         alg_time: Optional[float] = None,
     ):
         """
         Args:
-            hp_index: The index of the evaluated hyperparameter configuration.
-            b: The budget for which the hyperparameter configuration was evaluated.
-            y: The performance of the hyperparameter configuration.
+            score: The performance of the hyperparameter configuration.
+            learning_curve: The learning curve of the hyperparameter configuration.
             alg_time: The time taken from the algorithm to evaluate the hp configuration.
         """
-        # if y is an undefined value, append 0 as the overhead since we finish here.
-        if np.isnan(y):
-            self.update_info_dict(hp_index, b, y, 0)
-            self.diverged_configs.add(hp_index)
+        budget = learning_curve.size
+        # if score is an undefined value, append 0 as the overhead since we finish here.
+        if np.isnan(score):
+            self.update_info_dict(self.last_suggestion_index, budget, score, 0)
+            self.diverged_configs.add(self.last_suggestion_index)
             return
 
         observe_time_start = time.time()
-        if hp_index in self.examples:
-            # the hyperparameter exists, add the budget and performance
-            # for which it was evaluated.
-            self.examples[hp_index].append(b)
-            # it should exist in the performances too then
-            self.performances[hp_index].append(y)
-        else:
-            self.examples[hp_index] = [b]
-            self.performances[hp_index] = [y]
+        self.examples[self.last_suggestion_index] = np.arange(budget + 1)
+        self.performances[self.last_suggestion_index] = learning_curve
 
-        # TODO consider the minimization/maximization factor
-        if self.best_value_observed < y:
-            self.best_value_observed = y
+        if self.best_value_observed < score:
+            self.best_value_observed = score
             self.no_improvement_patience = 0
         else:
             self.no_improvement_patience += 1
@@ -379,7 +360,7 @@ class DyHPOAlgorithm:
         if alg_time is not None:
             total_duration = total_duration + alg_time
 
-        self.update_info_dict(hp_index, b, y, total_duration)
+        self.update_info_dict(self.last_suggestion_index, budget, score, total_duration)
 
     def prepare_examples(self, hp_indices: List) -> List[np.ndarray]:
         """
@@ -393,7 +374,7 @@ class DyHPOAlgorithm:
         """
         examples = []
         for hp_index in hp_indices:
-            examples.append(self.hp_candidates[hp_index])
+            examples.append(self.hp_candidates.iloc[hp_index].tolist())
 
         return examples
 
@@ -463,7 +444,7 @@ class DyHPOAlgorithm:
         for hp_index in self.examples:
             budgets = self.examples[hp_index]
             performances = self.performances[hp_index]
-            example = self.hp_candidates[hp_index]
+            example = self.hp_candidates.iloc[hp_index].tolist()
 
             for budget, performance in zip(budgets, performances):
                 train_examples.append(example)
@@ -501,8 +482,6 @@ class DyHPOAlgorithm:
         explore_factor: float
             The exploration factor for when ucb is used as the
             acquisition function.
-        ei_calibration_factor: float
-            The factor used to calibrate expected improvement.
         acq_fc: str
             The type of acquisition function to use.
 
@@ -534,7 +513,7 @@ class DyHPOAlgorithm:
         self,
         mean_predictions: np.ndarray,
         mean_stds: np.ndarray,
-        budgets: List,
+        budgets: np.ndarray,
     ) -> int:
         """
         Find the hyperparameter configuration that has the highest score
@@ -597,7 +576,7 @@ class DyHPOAlgorithm:
                 lower_fidelity_config_values.append(max(learning_curve))
 
         if len(exact_fidelity_config_values) > 0:
-            # lowest error corresponds to best value
+            # highest performance corresponds to best value
             best_value = max(exact_fidelity_config_values)
         else:
             best_value = max(lower_fidelity_config_values)
@@ -652,32 +631,6 @@ class DyHPOAlgorithm:
         with open(os.path.join(self.output_path, f'{self.dataset_name}_{self.seed}.json'), 'w') as fp:
             json.dump(self.info_dict, fp)
 
-    def preprocess_hp_candidates(self) -> List:
-        """
-        Preprocess the list of all hyperparameter candidates
-        by  performing a log transform for the hyperparameters that
-        were log sampled.
-
-        Returns:
-            log_hp_candidates: The list of all hyperparameter configurations
-                where hyperparameters that were log sampled are log transformed.
-        """
-        log_hp_candidates = []
-
-        for hp_candidate in self.hp_candidates:
-            new_hp_candidate = []
-            for index, hp_value in enumerate(hp_candidate):
-                new_hp_candidate.append(math.log(hp_value) if self.log_indicator[index] else hp_value)
-
-            log_hp_candidates.append(new_hp_candidate)
-
-        log_hp_candidates = np.array(log_hp_candidates)
-        # scaler for the hp configurations
-
-        log_hp_candidates = self.scaler.fit_transform(log_hp_candidates)
-
-        return log_hp_candidates
-
     @staticmethod
     def patch_curves_to_same_length(curves):
         """
@@ -693,6 +646,7 @@ class DyHPOAlgorithm:
             curves: The updated array where the learning
                 curves are of the same length.
         """
+        #TODO return nothing since it changes in place
         max_curve_length = 0
         for curve in curves:
             if len(curve) > max_curve_length:
