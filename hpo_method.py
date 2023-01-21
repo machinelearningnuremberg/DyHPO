@@ -315,36 +315,30 @@ class DyHPOAlgorithm:
         self,
         hp_index: int,
         b: int,
-        y: float,
+        learning_curve: np.ndarray,
         alg_time: Optional[float] = None,
     ):
         """
         Args:
             hp_index: The index of the evaluated hyperparameter configuration.
             b: The budget for which the hyperparameter configuration was evaluated.
-            y: The performance of the hyperparameter configuration.
+            learning_curve: The learning curve of the hyperparameter configuration.
             alg_time: The time taken from the algorithm to evaluate the hp configuration.
         """
+        score = learning_curve[-1]
         # if y is an undefined value, append 0 as the overhead since we finish here.
-        if np.isnan(y):
-            self.update_info_dict(hp_index, b, y, 0)
+        if np.isnan(learning_curve).any():
+            self.update_info_dict(hp_index, b, np.nan, 0)
             self.diverged_configs.add(hp_index)
             return
 
         observe_time_start = time.time()
-        if hp_index in self.examples:
-            # the hyperparameter exists, add the budget and performance
-            # for which it was evaluated.
-            self.examples[hp_index].append(b)
-            # it should exist in the performances too then
-            self.performances[hp_index].append(y)
-        else:
-            self.examples[hp_index] = [b]
-            self.performances[hp_index] = [y]
 
-        # TODO consider the minimization/maximization factor
-        if self.best_value_observed < y:
-            self.best_value_observed = y
+        self.examples[hp_index] = np.arange(b + 1).tolist()
+        self.performances[hp_index] = learning_curve
+
+        if self.best_value_observed < score:
+            self.best_value_observed = score
             self.no_improvement_patience = 0
         else:
             self.no_improvement_patience += 1
@@ -379,7 +373,7 @@ class DyHPOAlgorithm:
         if alg_time is not None:
             total_duration = total_duration + alg_time
 
-        self.update_info_dict(hp_index, b, y, total_duration)
+        self.update_info_dict(hp_index, b, score, total_duration)
 
     def prepare_examples(self, hp_indices: List) -> List[np.ndarray]:
         """

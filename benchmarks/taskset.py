@@ -101,6 +101,14 @@ class TaskSet(BaseBenchmark):
 
         return val_curve[budget - 1]
 
+    def get_curve(self, hp_index: int, budget: int) -> float:
+
+        val_curve = self.validation_curves[hp_index]
+
+        budget = int(budget)
+
+        return val_curve[0:budget].tolist()
+
     def get_incumbent_curve(self):
 
         best_value = np.inf

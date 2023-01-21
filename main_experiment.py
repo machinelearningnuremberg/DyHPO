@@ -44,7 +44,7 @@ parser.add_argument(
 parser.add_argument(
     '--project_dir',
     type=str,
-    default='/home/arlind/Desktop/DyHPO',#'C:\\Users\\arlin\\Desktop\\PhD\\Projekte\\DyHPO',
+    default='C:\\Users\\arlin\\Desktop\\DyHPO', #'/home/arlind/Desktop/DyHPO',
 )
 parser.add_argument(
     '--output_dir',
@@ -130,8 +130,9 @@ dyhpo_budgets = []
 while method_budget < budget_limit:
 
     hp_index, budget = dyhpo_surrogate.suggest()
-    performance = benchmark.get_performance(hp_index, budget)
-    dyhpo_surrogate.observe(hp_index, budget, performance)
+    performance_curve = benchmark.get_curve(hp_index, budget)
+    score = performance_curve[-1]
+    dyhpo_surrogate.observe(hp_index, budget, performance_curve)
     budget_cost = 0
     if hp_index in evaluated_configs:
         previous_budget = evaluated_configs[hp_index]
@@ -142,8 +143,8 @@ while method_budget < budget_limit:
 
     method_budget += budget_cost
 
-    if performance > incumbent:
-        incumbent = performance
+    if score > incumbent:
+        incumbent = score
         method_trajectory.append(incumbent)
         dyhpo_budgets.append(method_budget)
 

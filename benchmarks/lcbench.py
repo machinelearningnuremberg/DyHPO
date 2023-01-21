@@ -91,6 +91,18 @@ class LCBench(BaseBenchmark):
 
         return val_curve[budget - 1]
 
+    def get_curve(self, hp_index: int, budget: int) -> List[float]:
+
+        val_curve = self.benchmark.query(
+            dataset_name=self.dataset_name,
+            config_id=hp_index,
+            tag='Train/val_balanced_accuracy',
+        )
+        val_curve = val_curve[1:]
+        budget = int(budget)
+
+        return val_curve[0:budget]
+
     def get_incumbent_curve(self):
 
         inc_curve = self.benchmark.query_best(
