@@ -321,7 +321,7 @@ class DyHPOAlgorithm:
             return
 
         observe_time_start = time.time()
-        self.examples[self.last_suggestion_index] = np.arange(budget + 1)
+        self.examples[self.last_suggestion_index] = np.arange(budget + 1).tolist()
         self.performances[self.last_suggestion_index] = learning_curve
 
         if self.best_value_observed < score:
