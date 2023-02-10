@@ -6,7 +6,6 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-import pandas as pd
 from scipy.stats import norm
 import torch
 
@@ -17,7 +16,7 @@ class DyHPOAlgorithm:
 
     def __init__(
         self,
-        hyperparameter_candidates: pd.DataFrame,
+        hyperparameter_candidates: np.ndarray,
         max_budget: int,
         seed: int = 11,
         fantasize_step: int = 1,
@@ -30,7 +29,7 @@ class DyHPOAlgorithm:
     ):
         """
         Args:
-            hyperparameter_candidates: pd.DataFrame
+            hyperparameter_candidates: np.ndarray
                 The full list of hyperparameter candidates for
                 a given dataset.
             max_budget: int
@@ -374,7 +373,7 @@ class DyHPOAlgorithm:
         """
         examples = []
         for hp_index in hp_indices:
-            examples.append(self.hp_candidates.iloc[hp_index].tolist())
+            examples.append(self.hp_candidates[hp_index])
 
         return examples
 
@@ -444,7 +443,7 @@ class DyHPOAlgorithm:
         for hp_index in self.examples:
             budgets = self.examples[hp_index]
             performances = self.performances[hp_index]
-            example = self.hp_candidates.iloc[hp_index].tolist()
+            example = self.hp_candidates[hp_index]
 
             for budget, performance in zip(budgets, performances):
                 train_examples.append(example)
