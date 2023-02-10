@@ -21,6 +21,7 @@ class DyHPOAlgorithm:
         seed: int = 11,
         fantasize_step: int = 1,
         total_budget: int = 500,
+        explore_factor: float = 0.1,
         device: str = None,
         dataset_name: str = 'unknown',
         output_path: str = '.',
@@ -42,6 +43,9 @@ class DyHPOAlgorithm:
                 evaluate the performance of a hpc.
             total_budget: int
                 The total budget given for hyperparameter optimization.
+            explore_factor: float
+                The percentage with which configurations will be sampled
+                randomly and not from the model.
             device: str
                 The device where the experiment will be run on.
             dataset_name: str
@@ -100,7 +104,7 @@ class DyHPOAlgorithm:
         )
         self.init_budgets = [conf_individual_budget] * initial_configurations_nr
         # with what percentage configurations will be taken randomly instead of being sampled from the model
-        self.fraction_random_configs = 0.1
+        self.fraction_random_configs = explore_factor
 
         self.model = None
         # An index keeping track of where we are in the init_conf_indices
@@ -261,18 +265,25 @@ class DyHPOAlgorithm:
             best_config_index = random_indice
             self.initial_random_index += 1
         else:
-            mean_predictions, std_predictions, hp_indices, non_scaled_budgets = self._predict()
-            best_prediction_index = self.find_suggested_config(
-                mean_predictions,
-                std_predictions,
-                non_scaled_budgets,
-            )
-            """
-            the best prediction index is not always matching with the actual hp index.
-            Since when evaluating the acq function, we do not consider hyperparameter
-            candidates that diverged or that are evaluated fully.
-            """
-            best_config_index = hp_indices[best_prediction_index]
+            random_prob = np.random.rand(1)
+            random_prob = random_prob[0]
+
+            if random_prob < self.fraction_random_configs:
+                best_config_index = np.random.choice(self.hp_candidates.shape[0], 1)
+                best_config_index = best_config_index[0]
+            else:
+                mean_predictions, std_predictions, hp_indices, non_scaled_budgets = self._predict()
+                best_prediction_index = self.find_suggested_config(
+                    mean_predictions,
+                    std_predictions,
+                    non_scaled_budgets,
+                )
+                """
+                the best prediction index is not always matching with the actual hp index.
+                Since when evaluating the acq function, we do not consider hyperparameter
+                candidates that diverged or that are evaluated fully.
+                """
+                best_config_index = hp_indices[best_prediction_index]
 
             # decide for what budget we will evaluate the most
             # promising hyperparameter configuration next.
