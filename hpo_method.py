@@ -269,7 +269,7 @@ class DyHPOAlgorithm:
             random_prob = random_prob[0]
 
             if random_prob < self.fraction_random_configs:
-                best_config_index = np.random.choice(self.hp_candidates.shape[0], 1)
+                best_config_index = np.random.choice([i for i in range(0, self.hp_candidates.shape[0]) if i not in self.diverged_configs], 1)
                 best_config_index = best_config_index[0]
             else:
                 mean_predictions, std_predictions, hp_indices, non_scaled_budgets = self._predict()
@@ -429,6 +429,8 @@ class DyHPOAlgorithm:
                 hp_indices.append(hp_index)
                 hp_budgets.append(next_budget)
                 learning_curves.append(curve)
+            else:
+                self.diverged_configs.add(hp_index)
 
         configurations = self.prepare_examples(hp_indices)
 
