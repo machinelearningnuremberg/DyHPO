@@ -292,9 +292,14 @@ class DyHPOAlgorithm:
                 max_budget = max(evaluated_budgets)
                 budget = max_budget + self.fantasize_step
                 # this would only trigger if fantasize_step is bigger
-                # than 1
+                # than 1 or if we randomly sample a hyperparameter that
+                # has been evaluated fully, the last epoch not being
+                # from the framework.
                 if budget > self.max_benchmark_epochs:
                     budget = self.max_benchmark_epochs
+                    self.diverged_configs.add(best_config_index)
+                elif budget == self.max_benchmark_epochs:
+                    self.diverged_configs.add(best_config_index)
             else:
                 budget = self.fantasize_step
 
