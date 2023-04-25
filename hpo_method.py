@@ -415,7 +415,7 @@ class DyHPOAlgorithm:
                 max_budget = max(budgets)
                 next_budget = max_budget + self.fantasize_step
                 # take the learning curve until the point we have evaluated so far
-                curve = self.performances[hp_index][:max_budget - 1] if max_budget > 1 else [0.0]
+                curve = self.performances[hp_index][:max_budget]
                 # if the curve is shorter than the length of the kernel size,
                 # pad it with zeros
                 difference_curve_length = self.surrogate_config['cnn_kernel_size'] - len(curve)
